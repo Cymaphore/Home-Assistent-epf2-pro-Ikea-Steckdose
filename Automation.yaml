@@ -1,0 +1,14 @@
+alias: Scooter 1 Reset
+description: ""
+triggers:
+  - trigger: state
+    entity_id:
+      - input_button.scooter1reser
+    to: null
+conditions: []
+actions:
+  - action: utility_meter.reset
+    target:
+      entity_id: sensor.e_scooter1_scooter_energy_session
+    data: {}
+mode: single
