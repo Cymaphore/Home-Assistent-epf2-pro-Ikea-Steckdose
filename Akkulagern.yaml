@@ -1,0 +1,18 @@
+alias: "Akkulagern Modus "
+description: ""
+triggers:
+  - trigger: numeric_state
+    entity_id:
+      - sensor.scooter_akku_prozent
+    above: 70
+conditions:
+  - condition: state
+    entity_id: input_boolean.akkulagern
+    state:
+      - "on"
+actions:
+  - type: turn_off
+    device_id: eb4d9f339c8230b15f390974e3786809
+    entity_id: 9b5ba85093cd5619cccf3febc70591ae
+    domain: switch
+mode: single
