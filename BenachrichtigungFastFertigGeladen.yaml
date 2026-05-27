@@ -1,0 +1,25 @@
+alias: Fast fertig geladen alaert
+description: BENACHRICHTIGE, wenn die Ladeleistung unter 100W sinkt
+triggers:
+  - entity_id:
+      - sensor.grillplats_plug_leistung_3
+    below: 100
+    for:
+      hours: 0
+      minutes: 1
+      seconds: 0
+    trigger: numeric_state
+conditions:
+  - condition: state
+    entity_id: switch.grillplats_plug_3
+    state:
+      - "on"
+actions:
+  - action: notify.mobile_app_23122pcd1g
+    metadata: {}
+    data:
+      title: Scooter ist fast voll geladen
+      message: >-
+        Der Ladevorgang fast ist beendet. Wenn du denn akku jetzt mitnehmen
+        möchtest kannst du das ab jetzt tun.
+mode: single
