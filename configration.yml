@@ -1,0 +1,140 @@
+template:
+  - sensor:
+      # 1. Sensor für die geladenen Kilometer (basierend auf 12,6 Wh/km)
+      - name: "Scooter Geladene Kilometer"
+        unique_id: scooter_km_session
+        unit_of_measurement: "km"
+        device_class: distance
+        state_class: measurement
+        state: >
+          {# Berechnung: kWh * 79.36 (entspricht 12.6 Wh/km) #}
+          {{ (states('sensor.e_scooter1_scooter_energy_session') | float(0) * 79.36) | round(2) }}
+        attributes:
+          wh_per_km: 12.6
+          calculation_factor: 79.36
+
+      # 2. Sensor für die Ladekosten (mit festen 2 Nachkommastellen)
+      - name: "Scooter Ladekosten"
+        unique_id: scooter_cost_session
+        unit_of_measurement: "€"
+        device_class: monetary
+        state: >
+          {# Preis: 0.39 € pro kWh | Formatierung auf 2 Stellen #}
+          {% set cost = states('sensor.e_scooter1_scooter_energy_session') | float(0) * 0.39 %}
+          {{ "{:.2f}".format(cost) }}
+
+  - sensor:
+      - name: "Scooter Aktuelle Reichweite (geschätzt)"
+        unique_id: scooter_range_estimated
+        unit_of_measurement: "km"
+        device_class: distance
+        state: >
+          {% set voltage = states('sensor.scooter_akku_spannung_geschatzt') | float(0) %}
+          {% if voltage > 39.9 %}
+            {# Berechnung: (Aktuelle Volt - Leer Volt) * (Gesamt-km / Spannungs-Differenz) #}
+            {# (voltage - 39.9) * (50 / 14.5) #}
+            {{ ((voltage - 39.9) * 3.448) | round(1) }}
+          {% else %}
+            0
+          {% endif %}
+        attributes:
+          full_range_ref: 50
+          empty_voltage_ref: 39.9
+
+  - binary_sensor:
+      - name: "Scooter Ladevorgang Stabil"
+        unique_id: scooter_charging_stable
+        delay_on: "00:00:10"
+        state: "{{ states('sensor.grillplats_plug_leistung_3') | float(0) > 10 }}"
+
+    sensor:
+      - name: "Scooter Akku Spannung (geschätzt)"
+        unique_id: scooter_voltage_estimated
+        unit_of_measurement: "V"
+        device_class: voltage
+        state: >
+          {% set watt = states('sensor.grillplats_plug_leistung_3') | float(0) %}
+          {% set last_v = this.state | float(0) %}
+          {% set is_stable = is_state('binary_sensor.scooter_ladevorgang_stabil', 'on') %}
+
+          {% if watt > 10 %}
+            {% if is_stable %}
+              {% if watt > 130 %}
+                {# CC-Phase: Wir berechnen den Wert und halten den Höchststand #}
+                {% set current_calc = (watt * 0.2957) | round(1) %}
+                {% set peak = [current_calc, last_v] | max %}
+                {# Das hier ist die sichere Schreibweise für das Limit von 54.4V #}
+                {{ [peak, 54.4] | min }}
+              {% else %}
+                {# CV-Phase: Watt sinken am Ende #}
+                54.4
+              {% endif %}
+            {% else %}
+              {# Während der 10s Einschaltphase halten wir 0 oder den alten Wert #}
+              {{ last_v if last_v > 0 else 0 }}
+            {% endif %}
+          {% else %}
+            {# Reset wenn Stecker gezogen #}
+            0
+          {% endif %}
+
+
+  # 1. DER ANKER (Trigger-basiert)
+  # Er merkt sich EINMALIG beim Einstecken, wie voll der Akku war.
+  - trigger:
+      - platform: numeric_state
+        entity_id: sensor.grillplats_plug_leistung_3
+        above: 10
+        for: "00:01:00"
+    sensor:
+      - name: "Scooter Start Reichweite Fix"
+        unique_id: scooter_start_range_fix
+        unit_of_measurement: "km"
+        state: >
+          {% set v_now = states('sensor.scooter_akku_spannung_geschatzt') | float(0) %}
+          {# Wir ziehen 1.2V Ladedruck ab, um den echten Batteriestand zu schätzen #}
+          {% if v_now > 40 %}
+            {% set v_start = v_now - 1.2 %}
+            {{ ((v_start - 39.9) * 3.57) | round(2) }}
+          {% else %}
+            0
+          {% endif %}
+
+  # 2. DIE LIVE-ANZEIGE (Normaler Template-Sensor)
+  # Dieser Sensor rechnet bei jeder Änderung der geladenen km sofort neu.
+  - sensor:
+      - name: "Scooter Dynamische Gesamt-Reichweite"
+        unique_id: scooter_total_range_dynamic
+        unit_of_measurement: "km"
+        device_class: distance
+        state: >
+          {% set start_km = states('sensor.scooter_start_reichweite_fix') | float(0) %}
+          {% set geladen_km = states('sensor.scooter_geladene_kilometer') | float(0) %}
+          {% set gesamt = (start_km + geladen_km) | round(1) %}
+
+          {# Deckelung auf die maximale Reichweite von 51.8 km #}
+          {{ [gesamt, 51.8] | min }}
+
+  - sensor:
+      - name: "Scooter Akku Prozent"
+        unique_id: scooter_battery_level
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
+        state: >
+          {% set v = states('sensor.scooter_akku_spannung_geschatzt') | float(0) %}
+
+          {% if v >= 54.6 %} 100
+          {% elif v >= 52.975 %} {{ ((v - 52.975) / (54.6 - 52.975) * 10 + 90) | round(1) }}
+          {% elif v >= 51.545 %} {{ ((v - 51.545) / (52.975 - 51.545) * 10 + 80) | round(1) }}
+          {% elif v >= 50.18 %}  {{ ((v - 50.18) / (51.545 - 50.18) * 10 + 70) | round(1) }}
+          {% elif v >= 48.945 %} {{ ((v - 48.945) / (50.18 - 48.945) * 10 + 60) | round(1) }}
+          {% elif v >= 47.814 %} {{ ((v - 47.814) / (48.945 - 47.814) * 10 + 50) | round(1) }}
+          {% elif v >= 46.605 %} {{ ((v - 46.605) / (47.814 - 46.605) * 10 + 40) | round(1) }}
+          {% elif v >= 45.37 %}  {{ ((v - 45.37) / (46.605 - 45.37) * 10 + 30) | round(1) }}
+          {% elif v >= 44.005 %} {{ ((v - 44.005) / (45.37 - 44.005) * 10 + 20) | round(1) }}
+          {% elif v >= 42.185 %} {{ ((v - 42.185) / (44.005 - 42.185) * 10 + 10) | round(1) }}
+          {% elif v >= 40.56 %}  {{ ((v - 40.56) / (42.185 - 40.56) * 5 + 5) | round(1) }}
+          {% elif v >= 39.0 %}   {{ ((v - 39.0) / (40.56 - 39.0) * 5 + 0) | round(1) }}
+          {% else %} 0
+          {% endif %}
