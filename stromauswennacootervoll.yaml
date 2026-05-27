@@ -1,0 +1,28 @@
+alias: Scooter Abschaltung wenn voll
+description: Schaltet den IKEA Stecker aus, wenn die Ladeleistung unter 5W sinkt
+triggers:
+  - entity_id:
+      - sensor.grillplats_plug_leistung_3
+    below: 5
+    for:
+      hours: 0
+      minutes: 10
+      seconds: 0
+    trigger: numeric_state
+conditions:
+  - condition: state
+    entity_id: switch.grillplats_plug_3
+    state:
+      - "on"
+actions:
+  - target:
+      entity_id: switch.grillplats_plug_3
+    action: switch.turn_off
+    data: {}
+    enabled: true
+  - action: notify.mobile_app_23122pcd1g
+    metadata: {}
+    data:
+      title: Scooter voll geladen
+      message: Der Ladevorgang ist beendet. Der Stecker wurde ausgeschaltet.
+mode: single
